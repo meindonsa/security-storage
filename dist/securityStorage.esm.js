@@ -12,8 +12,19 @@ const Constant = {
 class SecurityStorage {
     constructor(secretKey = null) {
         this.metaStore = null;
+        if (!this.isStorageAvailable()) {
+            this.encryptionKey = secretKey !== null && secretKey !== void 0 ? secretKey : "";
+            this.metaStore = null;
+            return;
+        }
         this.encryptionKey = secretKey !== null && secretKey !== void 0 ? secretKey : this.resolveDefaultKey();
         this.init();
+    }
+    isStorageAvailable() {
+        return typeof window !== "undefined" && typeof localStorage !== "undefined";
+    }
+    namespacedKey(key) {
+        return `__ss_${key}`;
     }
     init() {
         let encrypted = localStorage.getItem(Constant.keys_name);
@@ -35,7 +46,9 @@ class SecurityStorage {
         localStorage.setItem(Constant.keys_name, encrypted);
     }
     setItem(key, data) {
-        if (this.hasInvalidString(key, data)) {
+        if (!this.isStorageAvailable())
+            return;
+        if (this.isInvalidKey(key) || this.isInvalidData(data)) {
             console.error("Opération impossible !");
             return;
         }
@@ -45,42 +58,70 @@ class SecurityStorage {
             console.error("Impossible d'initialiser le stockage sécurisé.");
             return;
         }
-        const newKey = this.generateRandomKey();
-        const encrypted = this.encrypt(data, newKey);
-        this.metaStore.array[key] = newKey;
-        localStorage.setItem(key, encrypted);
-        this.encryptMetaData(this.metaStore);
+        try {
+            const newKey = this.generateRandomKey();
+            const encrypted = this.encrypt(data, newKey);
+            this.metaStore.array[key] = newKey;
+            localStorage.setItem(this.namespacedKey(key), encrypted);
+            this.encryptMetaData(this.metaStore);
+        }
+        catch (error) {
+            console.error("SecurityStorage.setItem failed:", error);
+        }
     }
     getItem(key) {
         var _a;
-        if (this.hasInvalidString(key)) {
-            console.error("Opération impossible !");
+        if (!this.isStorageAvailable())
+            return null;
+        if (this.isInvalidKey(key)) {
+            console.error("Invalid operation !");
             return null;
         }
         if (this.metaStore == null)
             this.init();
-        const encrypted = localStorage.getItem(key);
+        let encrypted = localStorage.getItem(this.namespacedKey(key));
+        if (encrypted == null) {
+            encrypted = localStorage.getItem(key);
+        }
         if (encrypted == null)
             return null;
         const encryptKey = (_a = this.metaStore) === null || _a === void 0 ? void 0 : _a.array[key];
         if (!encryptKey)
             return null;
-        return this.decrypt(encrypted, encryptKey);
+        try {
+            return this.decrypt(encrypted, encryptKey);
+        }
+        catch (error) {
+            console.error("SecurityStorage.getItem failed:", error);
+            return null;
+        }
     }
     removeItem(key) {
         var _a;
-        if (this.hasInvalidString(key)) {
+        if (!this.isStorageAvailable())
+            return;
+        if (this.isInvalidKey(key)) {
             console.error("Opération impossible !");
             return;
         }
         if (this.metaStore == null)
             this.init();
+        localStorage.removeItem(this.namespacedKey(key));
         localStorage.removeItem(key);
         (_a = this.metaStore) === null || _a === void 0 ? true : delete _a.array[key];
         this.encryptMetaData(this.metaStore);
     }
     clear() {
-        localStorage.clear();
+        if (!this.isStorageAvailable())
+            return;
+        if (this.metaStore) {
+            Object.keys(this.metaStore.array).forEach((key) => {
+                localStorage.removeItem(this.namespacedKey(key));
+                localStorage.removeItem(key); // compat clés legacy non préfixées
+            });
+        }
+        localStorage.removeItem(Constant.keys_name);
+        this.metaStore = null;
         this.init();
     }
     encrypt(data, secretKey) {
@@ -190,16 +231,11 @@ class SecurityStorage {
         }
         return key;
     }
-    hasInvalidString(...strings) {
-        if (strings === null || strings === undefined) {
-            return true;
-        }
-        for (const string of strings) {
-            if (string === null || string === undefined || string === '') {
-                return true;
-            }
-        }
-        return false;
+    isInvalidKey(key) {
+        return key === null || key === undefined || key === '';
+    }
+    isInvalidData(data) {
+        return data === undefined;
     }
 }
 

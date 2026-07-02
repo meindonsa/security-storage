@@ -94,6 +94,16 @@ clear() {
 
 ```
 
+## SSR / Server-Side Rendering
+
+La librairie détecte automatiquement l'absence de `window`/`localStorage` (Angular Universal, Next.js, etc.)
+et devient un no-op sûr côté serveur : aucune exception levée, `getItem` renvoie `null`,
+les autres méthodes ne font rien tant que le code s'exécute côté serveur.
+
+## Clear
+
+`clear()` ne supprime que les entrées gérées par cette instance de `SecurityStorage`
+(plus ses métadonnées internes), pas l'intégralité du `localStorage` du domaine.
 ## Authors
 
 - [@Meindonsa](https://github.com/Meindonsa)

@@ -2,6 +2,8 @@ export declare class SecurityStorage {
     private encryptionKey;
     private metaStore;
     constructor(secretKey?: string | null);
+    private isStorageAvailable;
+    private namespacedKey;
     private init;
     private encryptMetaData;
     setItem(key: string, data: any): void;
@@ -15,5 +17,6 @@ export declare class SecurityStorage {
     private generateRandomKey;
     private deriveKeys;
     private resolveDefaultKey;
-    private hasInvalidString;
+    private isInvalidKey;
+    private isInvalidData;
 }
