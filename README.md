@@ -106,6 +106,14 @@ les autres méthodes ne font rien tant que le code s'exécute côté serveur.
 (plus ses métadonnées internes), pas l'intégralité du `localStorage` du domaine.
 ## Authors
 
+## Dérivation de clé
+
+Depuis la version 3 du schéma interne, les clés de chiffrement et d'intégrité (HMAC) sont
+dérivées de la `secretKey` fournie via PBKDF2 plutôt qu'un simple hachage, ce qui renforce
+la résistance contre une clé faible. Les données déjà stockées avec les versions
+précédentes du schéma restent lisibles automatiquement (migration transparente à la
+prochaine écriture).
+
 - [@Meindonsa](https://github.com/Meindonsa)
 
 ## Support

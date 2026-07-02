@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { AES, enc, HmacSHA256 } from "crypto-js";
+import {AES, enc, HmacSHA256, lib, SHA256} from "crypto-js";
 import { compressToUTF16 } from "lz-string";
 import { SecurityStorage } from "../src/securityStorage";
 
@@ -78,11 +78,11 @@ describe("SecurityStorage", () => {
     });
 
 
-    it("stores v2 payloads with random IV and HMAC", () => {
+    it("stores v3 payloads with random IV and HMAC (PBKDF2-derived keys)", () => {
         const storage = new SecurityStorage("test-secret-key");
         storage.setItem("token", "value");
         const raw = JSON.parse(localStorage.getItem("__ss_token") as string);
-        expect(raw.v).toBe(2);
+        expect(raw.v).toBe(3);
         expect(raw.d).toHaveProperty("iv");
         expect(raw.d).toHaveProperty("c");
         expect(raw.d).toHaveProperty("h");
@@ -137,5 +137,24 @@ describe("SecurityStorage", () => {
         new SecurityStorage();
         expect(spy).toHaveBeenCalled();
         spy.mockRestore();
+    });
+
+    it("still reads legacy v2 data (SHA256-derived keys, pre-PBKDF2)", () => {
+        const secretKey = "test-secret-key";
+        const encKey = SHA256(secretKey + ":enc").toString(enc.Hex);
+        const macKey = SHA256(secretKey + ":mac").toString(enc.Hex);
+        const ivWords = lib.WordArray.random(16);
+        const ivHex = enc.Hex.stringify(ivWords);
+
+        const cipherText = AES.encrypt(JSON.stringify("legacy-v2-value"), encKey, {
+            iv: ivWords,
+        }).toString();
+        const hmac = HmacSHA256(cipherText, macKey).toString(enc.Hex);
+        const compressed = compressToUTF16(cipherText);
+
+        const payload = { iv: ivHex, c: compressed, h: hmac };
+        const storage = new SecurityStorage(secretKey);
+
+        expect(storage["decryptV2"](payload, secretKey)).toBe("legacy-v2-value");
     });
 });
