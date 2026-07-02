@@ -5,7 +5,7 @@
     "changelog": "git log --pretty=format:\"* %s (%h)\" ${from}...${to}"
   },
   "github": {
-    "release": true
+    "release": false
   },
   "plugins": {
     "@release-it/conventional-changelog": {
