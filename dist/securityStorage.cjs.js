@@ -8,12 +8,13 @@ const Constant = {
     //base_key: "3b)w4&T£wy9$U4-PVSw]0moP!x7+g(",
     default_key_name: "_security_storage_default_key",
     iv: "8f3e5abe9f0406905fd09f8e8d5b30d8",
-    schema_version: 2,
+    schema_version: 3,
 };
 
 class SecurityStorage {
     constructor(secretKey = null) {
         this.metaStore = null;
+        this.derivedKeysCache = new Map();
         if (!this.isStorageAvailable()) {
             this.encryptionKey = secretKey !== null && secretKey !== void 0 ? secretKey : "";
             this.metaStore = null;
@@ -128,7 +129,7 @@ class SecurityStorage {
     }
     encrypt(data, secretKey) {
         try {
-            const { encKey, macKey } = this.deriveKeys(secretKey);
+            const { encKey, macKey } = this.deriveKeysV3(secretKey);
             const ivWords = cryptoJs.lib.WordArray.random(16);
             const ivHex = cryptoJs.enc.Hex.stringify(ivWords);
             const cipherText = cryptoJs.AES.encrypt(JSON.stringify(data), encKey, {
@@ -170,6 +171,9 @@ class SecurityStorage {
             if (parsed.v === 2) {
                 return this.decryptV2(parsed.d, secretKey);
             }
+            if (parsed.v === 3) {
+                return this.decryptV3(parsed.d, secretKey);
+            }
             throw new Error(`Unsupported schema version: ${parsed.v}`);
         }
         catch (error) {
@@ -192,7 +196,26 @@ class SecurityStorage {
         return JSON.parse(originalData);
     }
     decryptV2(payload, secretKey) {
-        const { encKey, macKey } = this.deriveKeys(secretKey);
+        const { encKey, macKey } = this.deriveKeysLegacyV2(secretKey);
+        const decompressedData = lzString.decompressFromUTF16(payload.c);
+        if (!decompressedData)
+            throw new Error("Decompression failed");
+        const expectedHmac = cryptoJs.HmacSHA256(decompressedData, macKey).toString(cryptoJs.enc.Hex);
+        if (expectedHmac !== payload.h) {
+            throw new Error("Integrity check failed: data may have been tampered with");
+        }
+        const originalData = cryptoJs.AES.decrypt(decompressedData, encKey, {
+            iv: cryptoJs.enc.Hex.parse(payload.iv),
+            keySize: 256 / 32,
+            mode: cryptoJs.mode.CBC,
+            padding: cryptoJs.pad.Pkcs7,
+        }).toString(cryptoJs.enc.Utf8);
+        if (!originalData)
+            throw new Error("Decryption failed");
+        return JSON.parse(originalData);
+    }
+    decryptV3(payload, secretKey) {
+        const { encKey, macKey } = this.deriveKeysV3(secretKey);
         const decompressedData = lzString.decompressFromUTF16(payload.c);
         if (!decompressedData)
             throw new Error("Decompression failed");
@@ -214,10 +237,29 @@ class SecurityStorage {
         const randomBytes = cryptoJs.lib.WordArray.random(length / 2);
         return cryptoJs.enc.Hex.stringify(randomBytes);
     }
-    deriveKeys(secretKey) {
+    deriveKeysLegacyV2(secretKey) {
         const encKey = cryptoJs.SHA256(secretKey + ":enc").toString(cryptoJs.enc.Hex);
         const macKey = cryptoJs.SHA256(secretKey + ":mac").toString(cryptoJs.enc.Hex);
         return { encKey, macKey };
+    }
+    /** Dérivation courante (Phase 3). PBKDF2 renforce la résistance au brute-force
+          *  si secretKey est une valeur faible/devinable. Mis en cache par secretKey pour
+          *  éviter de repayer le coût du KDF à chaque appel. */
+    deriveKeysV3(secretKey) {
+        const cached = this.derivedKeysCache.get(secretKey);
+        if (cached)
+            return cached;
+        const encKey = cryptoJs.PBKDF2(secretKey, "security-storage-enc", {
+            keySize: 256 / 32,
+            iterations: 1000,
+        }).toString(cryptoJs.enc.Hex);
+        const macKey = cryptoJs.PBKDF2(secretKey, "security-storage-mac", {
+            keySize: 256 / 32,
+            iterations: 1000,
+        }).toString(cryptoJs.enc.Hex);
+        const derived = { encKey, macKey };
+        this.derivedKeysCache.set(secretKey, derived);
+        return derived;
     }
     resolveDefaultKey() {
         if (typeof localStorage === "undefined") {

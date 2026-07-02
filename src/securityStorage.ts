@@ -1,4 +1,4 @@
-import {AES, enc, lib, mode, pad, HmacSHA256, SHA256} from "crypto-js";
+import {AES, enc, lib, mode, pad, HmacSHA256, SHA256, PBKDF2} from "crypto-js";
 import {compressToUTF16, decompressFromUTF16} from "lz-string";
 import {Constant} from "./constant";
 
@@ -11,6 +11,7 @@ interface MetaData {
 export class SecurityStorage {
     private encryptionKey: string;
     private metaStore: MetaData | null = null;
+    private derivedKeysCache: Map<string, { encKey: string; macKey: string }> = new Map();
 
     constructor(secretKey: string | null = null) {
         if (!this.isStorageAvailable()) {
@@ -128,7 +129,7 @@ export class SecurityStorage {
 
     private encrypt(data: any, secretKey: string): string {
         try {
-            const { encKey, macKey } = this.deriveKeys(secretKey);
+            const { encKey, macKey } = this.deriveKeysV3(secretKey);
             const ivWords = lib.WordArray.random(16);
             const ivHex = enc.Hex.stringify(ivWords);
 
@@ -176,6 +177,10 @@ export class SecurityStorage {
                 return this.decryptV2(parsed.d, secretKey);
             }
 
+            if (parsed.v === 3) {
+                return this.decryptV3(parsed.d, secretKey);
+            }
+
             throw new Error(`Unsupported schema version: ${parsed.v}`);
         } catch (error) {
             console.error("Decryption error:", error);
@@ -197,7 +202,27 @@ export class SecurityStorage {
     }
 
     private decryptV2(payload: { iv: string; c: string; h: string }, secretKey: string): any {
-        const { encKey, macKey } = this.deriveKeys(secretKey);
+        const { encKey, macKey } = this.deriveKeysLegacyV2(secretKey);
+        const decompressedData = decompressFromUTF16(payload.c);
+        if (!decompressedData) throw new Error("Decompression failed");
+
+        const expectedHmac = HmacSHA256(decompressedData, macKey).toString(enc.Hex);
+        if (expectedHmac !== payload.h) {
+            throw new Error("Integrity check failed: data may have been tampered with");
+        }
+
+        const originalData = AES.decrypt(decompressedData, encKey, {
+            iv: enc.Hex.parse(payload.iv),
+            keySize: 256 / 32,
+            mode: mode.CBC,
+            padding: pad.Pkcs7,
+        }).toString(enc.Utf8);
+        if (!originalData) throw new Error("Decryption failed");
+        return JSON.parse(originalData);
+    }
+
+    private decryptV3(payload: { iv: string; c: string; h: string }, secretKey: string): any {
+        const { encKey, macKey } = this.deriveKeysV3(secretKey);
         const decompressedData = decompressFromUTF16(payload.c);
         if (!decompressedData) throw new Error("Decompression failed");
 
@@ -221,10 +246,31 @@ export class SecurityStorage {
         return enc.Hex.stringify(randomBytes);
     }
 
-    private deriveKeys(secretKey: string): { encKey: string; macKey: string } {
+    private deriveKeysLegacyV2(secretKey: string): { encKey: string; macKey: string } {
         const encKey = SHA256(secretKey + ":enc").toString(enc.Hex);
         const macKey = SHA256(secretKey + ":mac").toString(enc.Hex);
         return { encKey, macKey };
+    }
+
+    /** Dérivation courante (Phase 3). PBKDF2 renforce la résistance au brute-force
+          *  si secretKey est une valeur faible/devinable. Mis en cache par secretKey pour
+          *  éviter de repayer le coût du KDF à chaque appel. */
+    private deriveKeysV3(secretKey: string): { encKey: string; macKey: string } {
+        const cached = this.derivedKeysCache.get(secretKey);
+        if (cached) return cached;
+
+        const encKey = PBKDF2(secretKey, "security-storage-enc", {
+            keySize: 256 / 32,
+            iterations: 1000,
+        }).toString(enc.Hex);
+        const macKey = PBKDF2(secretKey, "security-storage-mac", {
+            keySize: 256 / 32,
+            iterations: 1000,
+        }).toString(enc.Hex);
+
+        const derived = { encKey, macKey };
+        this.derivedKeysCache.set(secretKey, derived);
+        return derived;
     }
 
     private resolveDefaultKey(): string {
