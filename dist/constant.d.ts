@@ -1,5 +1,6 @@
 export declare const Constant: {
     keys_name: string;
-    base_key: string;
+    default_key_name: string;
     iv: string;
+    schema_version: number;
 };

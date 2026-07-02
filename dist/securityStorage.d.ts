@@ -10,6 +10,10 @@ export declare class SecurityStorage {
     clear(): void;
     private encrypt;
     private decrypt;
+    private decryptLegacyFixedIv;
+    private decryptV2;
     private generateRandomKey;
+    private deriveKeys;
+    private resolveDefaultKey;
     private hasInvalidString;
 }

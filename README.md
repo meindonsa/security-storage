@@ -25,7 +25,7 @@ npm install meindonsa/security-storage --save
 import SecurityStorage from "@meindonsa/security-storage";
 ...
 
-securityStorage = new SecurityStorage(/* your custom encryption key or not */);
+securityStorage = new SecurityStorage(/* your custom encryption key recommended */);
 ```
 
 then, you can use differents methods of service:
