@@ -44,11 +44,14 @@ export class SecurityStorage {
         }
 
         if(this.metaStore == null) this.init();
+        if(this.metaStore == null) {
+            console.error("Impossible d'initialiser le stockage sécurisé.");
+            return;
+        }
 
         const newKey: string = this.generateRandomKey();
         const encrypted: string = this.encrypt(data, newKey);
-        // @ts-ignore
-        this.metaStore?.array[key] = newKey;
+        this.metaStore.array[key] = newKey;
         localStorage.setItem(key, encrypted);
         this.encryptMetaData(this.metaStore);
     }
@@ -94,7 +97,8 @@ export class SecurityStorage {
                 mode: mode.CBC,
                 padding: pad.Pkcs7,
             }).toString();
-            return compressToUTF16(encryptedData);
+            const compressed = compressToUTF16(encryptedData);
+            return JSON.stringify({ v: Constant.schema_version, d: compressed });
         } catch (error) {
             console.error("Encryption error:", error);
             throw error;
@@ -103,7 +107,16 @@ export class SecurityStorage {
 
     private decrypt(encryptedData: string, secretKey: string): any {
         try {
-            const decompressedData = decompressFromUTF16(encryptedData);
+            let compressed: string = encryptedData;
+            try {
+                const parsed = JSON.parse(encryptedData);
+                if (parsed && typeof parsed === "object" && "v" in parsed && "d" in parsed) {
+                    compressed = parsed.d;
+                }
+            } catch {
+                // Format hérité (avant versionnement) : encryptedData est directement la chaîne compressée
+            }
+            const decompressedData = decompressFromUTF16(compressed);
             if (!decompressedData) throw new Error("Decompression failed");
             const originalData = AES.decrypt(decompressedData, secretKey, {
                 iv: enc.Hex.parse(Constant.iv),
