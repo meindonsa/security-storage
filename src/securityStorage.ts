@@ -13,8 +13,21 @@ export class SecurityStorage {
     private metaStore: MetaData | null = null;
 
     constructor(secretKey: string | null = null) {
+        if (!this.isStorageAvailable()) {
+            this.encryptionKey = secretKey ?? "";
+            this.metaStore = null;
+            return;
+        }
         this.encryptionKey = secretKey ?? this.resolveDefaultKey();
         this.init();
+    }
+
+    private isStorageAvailable(): boolean {
+        return typeof window !== "undefined" && typeof localStorage !== "undefined";
+    }
+
+    private namespacedKey(key: string): string {
+        return `__ss_${key}`;
     }
 
     private init(): void {
@@ -38,7 +51,8 @@ export class SecurityStorage {
     }
 
     public setItem(key: string, data: any): void {
-        if(this.hasInvalidString(key, data)){
+        if (!this.isStorageAvailable()) return;
+        if(this.isInvalidKey(key) || this.isInvalidData(data)){
             console.error("Opération impossible !");
             return
         }
@@ -49,43 +63,66 @@ export class SecurityStorage {
             return;
         }
 
-        const newKey: string = this.generateRandomKey();
-        const encrypted: string = this.encrypt(data, newKey);
-        this.metaStore.array[key] = newKey;
-        localStorage.setItem(key, encrypted);
-        this.encryptMetaData(this.metaStore);
+        try {
+            const newKey: string = this.generateRandomKey();
+            const encrypted: string = this.encrypt(data, newKey);
+            this.metaStore.array[key] = newKey;
+            localStorage.setItem(this.namespacedKey(key), encrypted);
+            this.encryptMetaData(this.metaStore);
+        } catch (error) {
+            console.error("SecurityStorage.setItem failed:", error);
+        }
     }
 
     public getItem(key: string): any | null {
-        if(this.hasInvalidString(key)){
-            console.error("Opération impossible !");
+        if (!this.isStorageAvailable()) return null;
+        if(this.isInvalidKey(key)){
+            console.error("Invalid operation !");
             return null;
         }
 
         if(this.metaStore == null) this.init();
 
-        const encrypted: string | null = localStorage.getItem(key);
+        let encrypted: string | null = localStorage.getItem(this.namespacedKey(key));
+        if (encrypted == null) {
+            encrypted = localStorage.getItem(key);
+        }
         if(encrypted == null) return null;
 
         const encryptKey: string | undefined = this.metaStore?.array[key];
         if(!encryptKey) return null;
 
-        return this.decrypt(encrypted, encryptKey);
+        try {
+            return this.decrypt(encrypted, encryptKey);
+        } catch (error) {
+            console.error("SecurityStorage.getItem failed:", error);
+            return null;
+        }
     }
 
     public removeItem(key: string): void {
-        if(this.hasInvalidString(key)){
+        if (!this.isStorageAvailable()) return;
+        if(this.isInvalidKey(key)){
             console.error("Opération impossible !");
             return;
         }
         if(this.metaStore == null) this.init();
-        localStorage.removeItem(key)
+        localStorage.removeItem(this.namespacedKey(key));
+        localStorage.removeItem(key);
         delete this.metaStore?.array[key];
         this.encryptMetaData(this.metaStore);
     }
 
     public clear(): void {
-        localStorage.clear();
+        if (!this.isStorageAvailable()) return;
+        if (this.metaStore) {
+            Object.keys(this.metaStore.array).forEach((key) => {
+                localStorage.removeItem(this.namespacedKey(key));
+                localStorage.removeItem(key); // compat clés legacy non préfixées
+            });
+        }
+        localStorage.removeItem(Constant.keys_name);
+        this.metaStore = null;
         this.init();
     }
 
@@ -210,15 +247,11 @@ export class SecurityStorage {
         return key;
     }
 
-    private hasInvalidString(...strings: (string | null | undefined)[]): boolean {
-        if (strings === null || strings === undefined) {
-            return true;
-        }
-        for (const string of strings) {
-            if (string === null || string === undefined || string === '') {
-                return true;
-            }
-        }
-        return false;
+    private isInvalidKey(key: string | null | undefined): boolean {
+        return key === null || key === undefined || key === '';
+    }
+
+    private isInvalidData(data: any): boolean {
+        return data === undefined;
     }
 }
